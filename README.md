@@ -8,7 +8,9 @@ search engine. SUPER EASY TO SET UP, I have a tutorial that shows you how to set
 
 Tips:
 Quotations: Using quotations will help with receiving very specific results. If your search is too broad, expect a broad scope of results.
+
 (before:YYYY-MM-DD) (after:YYYY-MM-DD): The search results will show you results before / after a specific date
+
 -: take a channel out of the search results if it is clouding up your search ("People" -MrPersonDude) will show you results excluding anything posted by MrPersonDude
 
 Sorting by newest tips: [thing you wanna search] after:YYYY-MM-DD (yesterday's date) will force a deeper search into the last 24 hours
