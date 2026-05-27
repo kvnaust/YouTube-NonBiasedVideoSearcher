@@ -4,7 +4,7 @@ Sort by relevance, upload date (newest/oldest), view count (lowest/highest), and
 Use Google Dorks to refine your search (before:YYYY-MM-DD) (after:YYYY-MM-DD) (quotations).
 
 This search engine relies on YouTube Data API V3 in order to receive data from YouTube. You'll need to get a free API key to use this
-search engine. SUPER EASY TO SET UP, I have a tutorial that shows you how to set it all up. A free API key grants you 200 searches a day (10,000 tokens) (50 results per search) which is plenty for the average user. Some users like me want to find really low-viewed videos and obscure keyphrases, so I'd suggest you get multiple API keys. Just use multiple g-mail accounts to set up all the API keys and keep them in a place where you can just pull them from when one runs out. Obviously KEEP YOUR KEYS TO YOURSELF. Everything is local, in the same way everyone has their own library card(s) that they can use to access the books at the library.
+search engine. SUPER EASY TO SET UP, I have a tutorial that shows you how to set it all up. A free API key grants you 200 API calls a day (50 results per search) which is plenty for the average user. Anytime you wanna add 50 more results to the search will cost an API call. Some users like me want to find really low-viewed videos and obscure keyphrases, so I'd suggest you get multiple API keys. Just use multiple g-mail accounts to set up all the API keys and keep them in a place where you can just pull them from when one runs out. Obviously KEEP YOUR KEYS TO YOURSELF. Everything is local, in the same way everyone has their own library card(s) that they can use to access the books at the library.
 
 Tips:
 
