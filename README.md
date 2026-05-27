@@ -22,8 +22,7 @@ Sorting by lowest view tips: Maxing out the search query (500 results) will forc
 do because it prioritizes the most recent results. This will cost you more tokens but after a few clicks you WILL have the lowest viewed
 results. 
 
-Filter YouTube Shorts: The best thing that I could come up for is excluding any video that has a hashtag [#] in the title or description. 
-Many shorts have this, BUT NOT ALL OF THEM DO. YouTube Data API V3 doesn't recognize the difference between a long-form video and a short; it will just show you everything.
+Filter out YouTube Shorts: Many shorts get filtered out, but some still get through the cracks. YouTube Data API V3 doesn't recognize the difference between a long-form video and a short.
 
 Exact title match: Whatever you put into the search bar is what you will get (NOT including google dorks). If you search for 
 [I am a human being before:2009] You will find videos with the title "I am a human being" posted before 2009. Exact title match. 
