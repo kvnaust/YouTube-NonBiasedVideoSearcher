@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Non-Biased Video Searcher</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: Arial;
+        }
+        @keyframes searchSweep {
+            0%   { left: -60%; }
+            100% { left: 110%; }
+        }
+        .search-sweep {
+            animation: searchSweep 1.2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            const [apiKey, setApiKey] = useState('');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [results, setResults] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [loadingMore, setLoadingMore] = useState(false);
+            const [error, setError] = useState('');
+            const [showApiInstructions, setShowApiInstructions] = useState(false);
+            const [darkMode, setDarkMode] = useState(false);
+            const [nextPageToken, setNextPageToken] = useState(null);
+            const [currentQuery, setCurrentQuery] = useState('');
+            const [filterShorts, setFilterShorts] = useState(false);
+            const [exactTitle, setExactTitle] = useState(false);
+            const [sortBy, setSortBy] = useState('date');
+            const [showSortMenu, setShowSortMenu] = useState(false);
+            const sortMenuRef = useRef(null);
+
+            useEffect(() => {
+                const handleClickOutside = (e) => {
+                    if (sortMenuRef.current && !sortMenuRef.current.contains(e.target)) {
+                        setShowSortMenu(false);
+                    }
+                };
+                document.addEventListener('mousedown', handleClickOutside);
+                return () => document.removeEventListener('mousedown', handleClickOutside);
+            }, []);
+            const [viewCounts, setViewCounts] = useState({});
+            const [durations, setDurations] = useState({});
+            const [shortsMap, setShortsMap] = useState({});
+            const [currentChannelId, setCurrentChannelId] = useState(null);
+            const [showBackToTop, setShowBackToTop] = useState(false);
+            const [isoDates, setIsoDates] = useState({});
+
+            useEffect(() => {
+                const handleScroll = () => {
+                    setShowBackToTop(window.scrollY > 600);
+                };
+                window.addEventListener('scroll', handleScroll);
+                return () => window.removeEventListener('scroll', handleScroll);
+            }, []);
+
+            const scrollToTop = () => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            useEffect(() => {
+                const saved = localStorage.getItem('ytApiKey');
+                if (saved) setApiKey(saved);
+                
+                const savedDarkMode = localStorage.getItem('darkMode');
+                if (savedDarkMode === 'true') setDarkMode(true);
+            }, []);
+
+            
+            useEffect(() => {
+                localStorage.setItem('darkMode', darkMode);
+            }, [darkMode]);
+
+            const saveApiKey = () => {
+                localStorage.setItem('ytApiKey', apiKey);
+                alert('API key saved! Ayyyeee');
+            };
+
+            
+            const extractTitleFromQuery = (query) => {
+                return query
+                    .replace(/\b(before|after|site|intitle|inurl|filetype|related|cache|allintitle|allinurl|allintext|AROUND\(\d+\)):\S+/gi, '')
+                    .replace(/^["']|["']$/g, '')
+                    .trim();
+            };
+
+            const fetchAndFilterPage = async (url, query) => {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || 'API request failed');
+                }
+                const data = await response.json();
+                let items = data.items || [];
+
+                if (filterShorts) {
+                    items = items.filter(item => {
+                        const title = (item.snippet.title || '');
+                        const desc  = (item.snippet.description || '');
+                        return !title.includes('#') && !desc.includes('#');
+                    });
+                }
+                if (exactTitle) {
+                    const titleOnly = extractTitleFromQuery(query).toLowerCase();
+                    items = items.filter(item =>
+                        item.snippet.title.trim().toLowerCase() === titleOnly
+                    );
+                }
+                return { items, nextPageToken: data.nextPageToken || null };
+            };
+
+            const parseDuration = (iso) => {
+                if (!iso) return '';
+                const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                if (!match) return '';
+                const h = parseInt(match[1] || 0);
+                const m = parseInt(match[2] || 0);
+                const s = parseInt(match[3] || 0);
+                if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+                return `${m}:${String(s).padStart(2,'0')}`;
+            };
+            //KVN AUST WAS HERE...
+            const getViewCounts = async (videos) => {
+                const allIds = videos.map(v => v.id.videoId).filter(Boolean);
+                let vcMap = {};
+                let durMap = {};
+                for (let i = 0; i < allIds.length; i += 50) {
+                    const batch = allIds.slice(i, i + 50).join(',');
+                    try {
+                        const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics,contentDetails&id=${batch}&key=${apiKey}`);
+                        if (res.ok) {
+                            const d = await res.json();
+                            d.items.forEach(v => {
+                                vcMap[v.id] = parseInt(v.statistics.viewCount || 0);
+                                durMap[v.id] = parseDuration(v.contentDetails?.duration);
+                            });
+                        }
+                    } catch (e) {
+                        
+                    }
+                }
+                setDurations(prev => ({ ...prev, ...durMap }));
+                return { vcMap, durMap };
+            };
+
+            const durationToSeconds = (str) => {
+                if (!str) return 0;
+                const parts = str.split(':').map(Number);
+                if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+                if (parts.length === 2) return parts[0] * 60 + parts[1];
+                return 0;
+            };
+
+            const sortVideos = (videos, vcMap, durMap = {}) => {
+                if (sortBy === 'relevance') return [...videos]; 
+                return [...videos].sort((a, b) => {
+                    if (sortBy === 'date') return new Date(b.snippet.publishedAt) - new Date(a.snippet.publishedAt);
+                    if (sortBy === 'dateOldest') return new Date(a.snippet.publishedAt) - new Date(b.snippet.publishedAt);
+                    if (sortBy === 'viewCountDesc') {
+                        const diff = (vcMap[b.id.videoId] || 0) - (vcMap[a.id.videoId] || 0);
+                        if (diff !== 0) return diff;
+                        return new Date(a.snippet.publishedAt) - new Date(b.snippet.publishedAt);
+                    }
+                    if (sortBy === 'durationAsc') return durationToSeconds(durMap[a.id.videoId]) - durationToSeconds(durMap[b.id.videoId]);
+                    if (sortBy === 'durationDesc') return durationToSeconds(durMap[b.id.videoId]) - durationToSeconds(durMap[a.id.videoId]);
+                    
+                    const diff = (vcMap[a.id.videoId] || 0) - (vcMap[b.id.videoId] || 0);
+                    if (diff !== 0) return diff;
+                    return new Date(a.snippet.publishedAt) - new Date(b.snippet.publishedAt);
+                });
+            };
+
+            const searchVideos = async (isLoadMore = false) => {
+                if (!apiKey.trim()) {
+                    setError('You have to enter your YouTube API key first');
+                    return;
+                }
+                if (!searchQuery.trim() && !isLoadMore) {
+                    setError('I cannot let you search nothing. That would be a waste of tokens');
+                    return;
+                }
+
+                if (isLoadMore) {
+                    setLoadingMore(true);
+                } else {
+                    setLoading(true);
+                    setResults([]);
+                    setNextPageToken(null);
+                    setCurrentQuery(searchQuery);
+                    setCurrentChannelId(null);
+                    setDurations({});
+                    setShortsMap({});
+                }
+
+                setError('');
+
+                try {
+                    const query = isLoadMore ? currentQuery : searchQuery;
+
+                    
+                    const apiOrder = (sortBy === 'viewCountDesc') ? 'viewCount' : (sortBy === 'relevance') ? 'relevance' : 'date';
+                    const baseUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=50&order=${apiOrder}&key=${apiKey}`;
+
+                    if (sortBy === 'dateOldest' && !isLoadMore) {
+                        let allItems = [];
+                        let pageToken = null;
+                        let pagesScanned = 0;
+                        const MAX_PAGES = 4;
+
+                        do {
+                            const url = pageToken ? `${baseUrl}&pageToken=${pageToken}` : baseUrl;
+                            const { items, nextPageToken: npt } = await fetchAndFilterPage(url, query);
+                            allItems = [...allItems, ...items];
+                            pageToken = npt;
+                            pagesScanned++;
+                        } while (pageToken && pagesScanned < MAX_PAGES);
+
+                        const { vcMap, durMap } = await getViewCounts(allItems);
+                        const orientationMap = await checkThumbnailOrientations(allItems);
+                        const filtered = filterShortsFromList(allItems, durMap, orientationMap);
+                        setResults(sortVideos(filtered, vcMap, durMap));
+                        setViewCounts(vcMap);
+                        setNextPageToken(pageToken);
+                        setLoading(false);
+                        setLoadingMore(false);
+                        return;
+                    }
+
+                    if (exactTitle && !isLoadMore) {
+                        let allMatches = [];
+                        let allViewCounts = {};
+                        let pageToken = null;
+                        let pagesScanned = 0;
+                        const MAX_PAGES = 10;
+
+                        do {
+                            const url = pageToken ? `${baseUrl}&pageToken=${pageToken}` : baseUrl;
+                            const { items, nextPageToken: npt } = await fetchAndFilterPage(url, query);
+                            allMatches = [...allMatches, ...items];
+                            pageToken = npt;
+                            pagesScanned++;
+                            
+                            if (allMatches.length > 0) {
+                                const { vcMap, durMap } = await getViewCounts(allMatches);
+                                allViewCounts = vcMap;
+                                const orientationMap = await checkThumbnailOrientations(allMatches);
+                                const filtered = filterShortsFromList(allMatches, durMap, orientationMap);
+                                setResults(sortVideos(filtered, vcMap, durMap));
+                                setViewCounts(vcMap);
+                            }
+                        } while (pageToken && pagesScanned < MAX_PAGES);
+
+                        setNextPageToken(pageToken);
+                        setLoading(false);
+                        setLoadingMore(false);
+                        return;
+                    }
+
+                    
+                    let url = isLoadMore && nextPageToken ? `${baseUrl}&pageToken=${nextPageToken}` : baseUrl;
+                    const { items: videosToDisplay, nextPageToken: npt } = await fetchAndFilterPage(url, query);
+
+                    
+                    let merged = [...videosToDisplay];
+                    if (!isLoadMore) {
+                        try {
+                        const channelSearchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=channel&maxResults=1&key=${apiKey}`;
+                        const channelResponse = await fetch(channelSearchUrl);
+                        if (channelResponse.ok) {
+                            const channelData = await channelResponse.json();
+                            if (channelData.items && channelData.items.length > 0) {
+                                const matchedChannel = channelData.items[0];
+                                const matchedName = matchedChannel.snippet.title.toLowerCase();
+                                const queryLower = query.replace(/^@/, '').trim().toLowerCase();
+                                if (matchedName.includes(queryLower) || queryLower.includes(matchedName)) {
+                                    const channelId = matchedChannel.snippet.channelId;
+                                    setCurrentChannelId(channelId);
+                                    try {
+                                        const cvRes = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&maxResults=50&order=${apiOrder}&key=${apiKey}`);
+                                        if (cvRes.ok) {
+                                            const cvData = await cvRes.json();
+                                            const seenIds = new Set(merged.map(v => v.id.videoId));
+                                            for (const v of (cvData.items || [])) {
+                                                if (!seenIds.has(v.id.videoId)) {
+                                                    merged.push(v);
+                                                    seenIds.add(v.id.videoId);
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        
+                                    }
+                                }
+                            }
+                        }
+                        } catch (e) {
+                           
+                        }
+                    }
+
+                    const { vcMap: viewCountMap, durMap } = await getViewCounts(merged);
+                    const orientationMap = await checkThumbnailOrientations(merged);
+                    const filteredMerged = filterShortsFromList(merged, durMap, orientationMap);
+                    const sorted = sortVideos(filteredMerged, viewCountMap, durMap);
+
+                    if (isLoadMore) {
+                        const combinedDurMap = { ...durations, ...durMap };
+                        setResults(prev => sortVideos([...prev, ...sorted], { ...viewCounts, ...viewCountMap }, combinedDurMap));
+                        setViewCounts(prev => ({ ...prev, ...viewCountMap }));
+                    } else {
+                        setResults(sorted);
+                        setViewCounts(viewCountMap);
+                    }
+
+                    setNextPageToken(npt);
+
+                } catch (err) {
+                    const msg = err.message.toLowerCase();
+                    setError(msg.includes('quota') || msg.includes('exceeded')
+                        ? "Your API key ran out of tokens for the day. Daily limits reset @ Midnight PST! Switch out API keys while you wait."
+                        : err.message
+                    );
+                } finally {
+                    setLoading(false);
+                    setLoadingMore(false);
+                }
+            };
+
+            const decodeHTML = (text) => {
+                const el = document.createElement('textarea');
+                el.innerHTML = text;
+                return el.value;
+            };
+
+            const formatDate = (dateString) => {
+                const date = new Date(dateString);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                const diffMinutes = Math.floor(diffMs / (1000 * 60));
+
+                if (diffMinutes < 60) return `${diffMinutes} ${diffMinutes === 1 ? 'minute' : 'minutes'} ago`;
+                if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+                if (diffDays < 7) return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
+                const weeks = Math.floor(diffDays / 7);
+                if (diffDays < 30) return `${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`;
+                const months = Math.floor(diffDays / 30);
+                if (diffDays < 365) return `${months} ${months === 1 ? 'month' : 'months'} ago`;
+                const years = Math.floor(diffDays / 365);
+                return `${years} ${years === 1 ? 'year' : 'years'} ago`;
+            };
+
+            const formatViewCount = (count) => {
+                if (count === 0) return 'No views';
+                if (count < 1000) return `${count} ${count === 1 ? 'view' : 'views'}`;
+                if (count < 1000000) return `${(count / 1000).toFixed(1)}K views`;
+                if (count < 1000000000) return `${(count / 1000000).toFixed(1)}M views`;
+                return `${(count / 1000000000).toFixed(1)}B views`;
+            };
+
+            const getDateDisplay = (dateString, videoId) => {
+                const d = new Date(dateString);
+                if (isoDates[videoId]) {
+                    const isoDate = d.toISOString().split('T')[0];
+                    const parts = d.toLocaleString().split(', ');
+                    const timeStr = parts.slice(1).join(', ');
+                    return `${isoDate}, ${timeStr}`;
+                }
+                return d.toLocaleString();
+            };
+
+            const checkThumbnailOrientations = async (videos) => {
+                const entries = await Promise.all(
+                    videos.map(video => new Promise(resolve => {
+                        const videoId = video.id.videoId;
+                        
+                        const title = (video.snippet.title || '');
+                        const desc  = (video.snippet.description || '');
+                        if (title.includes('#') || desc.includes('#')) return resolve([videoId, true]);
+                        
+                        const img = new Image();
+                        img.onload = () => resolve([videoId, img.naturalHeight > img.naturalWidth ? true : false]);
+                        img.onerror = () => resolve([videoId, null]);
+                        img.src = `https://i.ytimg.com/vi/${videoId}/oardefault.jpg`;
+                    }))
+                );
+                const map = Object.fromEntries(entries);
+                setShortsMap(prev => ({ ...prev, ...map }));
+                return map;
+            };
+
+            const getVideoUrl = (videoId) => {
+                const orientation = shortsMap[videoId];
+                if (orientation === true)  return `https://www.youtube.com/shorts/${videoId}`;
+                if (orientation === false) return `https://www.youtube.com/watch?v=${videoId}`;
+                
+                const secs = durationToSeconds(durations[videoId]);
+                return (secs > 0 && secs <= 60)
+                    ? `https://www.youtube.com/shorts/${videoId}`
+                    : `https://www.youtube.com/watch?v=${videoId}`;
+            };
+
+            
+            const filterShortsFromList = (items, durMap, orientationMap) => {
+                if (!filterShorts) return items;
+                return items.filter(item => {
+                    const videoId = item.id.videoId;
+                    const orientation = orientationMap[videoId];
+                    if (orientation === true)  return false; 
+                    if (orientation === false) return true;  
+                    
+                    const secs = durationToSeconds(durMap[videoId]);
+                    return !(secs > 0 && secs <= 60);
+                });
+            };
+
+            return (
+                <>
+                <div className={`min-h-screen p-3 sm:p-6 ${darkMode ? 'bg-[#2a2a2a]' : 'bg-gray-100'}`}>
+                    <div className="max-w-5xl mx-auto">
+                        
+                        <div className="flex flex-wrap justify-between items-start mb-6 gap-2">
+                            <div>
+                                <h1 className={`text-3xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                    Non-biased Video Searcher for YouTube <a href="https://www.youtube.com/kvnaust" target="_blank" className={darkMode ? 'text-blue-400 underline' : 'text-blue-600 underline'}>[KVN AUST]</a>
+                                </h1>
+                                <p className={darkMode ? 'text-gray-400' : 'text-gray-500'}>
+                                    -Search for YouTube videos without bias from the algorithm or your watch history. 
+                                </p>
+                                <p className={darkMode ? 'text-gray-400' : 'text-gray-500'}>
+                                    -Sort by relevance, upload date, view count, and view duration.
+                                </p>
+                                <p className={darkMode ? 'text-gray-400' : 'text-gray-500'}>
+                                    -Use Google Dorks to refine your search (before:YYYY-MM-DD) (after:YYYY-MM-DD) (quotations).
+                                </p>
+                                <p className={darkMode ? 'text-gray-400' : 'text-gray-500'}>
+                                    -<a href="https://youtu.be/GyvjH1RkBuY" target="_blank" className={darkMode ? 'text-blue-400 underline' : 'text-blue-600 underline'}>Watch my tutorial</a> to get the best out of using this site.
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setDarkMode(!darkMode)}
+                                className={`py-2 font-medium transition-colors ${
+                                    darkMode 
+                                        ? 'bg-gray-600 text-white hover:bg-gray-500' 
+                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
+                                style={{ width: '48px', textAlign: 'center' }}
+                                title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                            >
+                                {darkMode ? '☾' : '☀'}
+                            </button>
+                        </div>
+
+                        
+                        <div className={`shadow p-6 mb-6 ${darkMode ? 'bg-[#3a3a3a]' : 'bg-white'}`}>
+                            <div className="flex items-center justify-between mb-3">
+                                <h2 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                    YouTube API Key (Requires a G-Mail account to obtain)
+                                </h2>
+                                <button
+                                    onClick={() => setShowApiInstructions(!showApiInstructions)}
+                                    className={`text-sm ${darkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'}`}
+                                >
+                                    {showApiInstructions ? 'Hide' : 'GET YOUR API KEY'}
+                                </button>
+                            </div>
+
+                            {showApiInstructions && (
+                                <div className={`p-4 mb-4 text-sm ${
+                                    darkMode 
+                                        ? 'bg-[#4a4a4a] border border-[#888888]' 
+                                        : 'bg-gray-100 border border-gray-300'
+                                }`}>
+                                    <h3 className={`font-semibold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                        Getting a free YouTube API key:
+                                    </h3>
+                                    <ol className={`list-decimal ml-5 space-y-1 ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                                        <li>Go to <a href="https://console.cloud.google.com" target="_blank" className={darkMode ? 'text-blue-400 underline' : 'text-blue-600 underline'}>Google Cloud Console</a></li>
+                                        <li>At the top-left of the screen, click Select Project, and then click New Project on the top right of the pop-up window</li>
+                                        <li>Name the project and wait for it to be created. Afterwards, select the proj.</li>
+                                        <li>While inside the proj, Click search at the top-middle of the screen. Search "YouTube Data API v3." Click on it and Enable it.</li>
+                                        <li>Afterwards, on the left side of the screen, open the expanding shelf. Go to Credentials → +Create Credentials → API Key.</li>
+                                        <li>In the right-side window, select API Restrictions, choose YouTube Data API V3, and then hit "Create."</li>
+                                        <li>Copy the created API key and paste it in the area below.</li>
+                                    </ol>
+                                    <p className={`mt-2 ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                                        Google's free tier allows ~200 API calls a day (per gmail account). Limit resets @ Midnight PST.
+                                    </p>
+                                </div>
+                            )}
+
+                            <div className="flex gap-2">
+                                <input
+                                    type="password"
+                                    value={apiKey}
+                                    onChange={(e) => setApiKey(e.target.value)}
+                                    placeholder="Paste your YouTube API key here"
+                                    className={`flex-1 px-4 py-2 border focus:ring-2 focus:border-transparent ${
+                                        darkMode 
+                                            ? 'bg-[#3a3a3a] border-white text-white placeholder-gray-400 focus:ring-white' 
+                                            : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
+                                    }`}
+                                />
+                                <button
+                                    onClick={saveApiKey}
+                                    className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700"
+                                >
+                                    Save Key
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className={`shadow p-6 mb-6 ${darkMode ? 'bg-[#3a3a3a]' : 'bg-white'}`}>
+                            <p className={`text-sm font-medium mb-4 ${darkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                              ← Apply parameters AND THEN hit search →
+                            </p>
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-7 gap-4">
+                                <div className="flex flex-col gap-2">
+                                    <div className="flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            id="filterShorts"
+                                            checked={filterShorts}
+                                            onChange={(e) => setFilterShorts(e.target.checked)}
+                                            className="w-4 h-4 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                                        />
+                                        <label htmlFor="filterShorts" className={`ml-2 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-700'}`}>
+                                            Filter out YouTube Shorts
+                                        </label>
+                                    </div>
+                                    <div className="flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            id="exactTitle"
+                                            checked={exactTitle}
+                                            onChange={(e) => setExactTitle(e.target.checked)}
+                                            className="w-4 h-4 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                                        />
+                                        <label htmlFor="exactTitle" className={`ml-2 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-700'}`}>
+                                            Exact title match 
+                                        </label>
+                                    </div>
+                                </div>
+                                <div className="relative" ref={sortMenuRef}>
+                                    <button
+                                        onClick={() => setShowSortMenu(!showSortMenu)}
+                                        className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${
+                                            darkMode 
+                                                ? 'bg-gray-600 text-white hover:bg-gray-500' 
+                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                        }`}
+                                    >
+                                        Sort: {sortBy === 'relevance' ? 'Relevance' : sortBy === 'date' ? 'Upload Date - Newest' : sortBy === 'dateOldest' ? 'Upload Date - Oldest' : sortBy === 'viewCount' ? 'View Count - Low to High' : sortBy === 'viewCountDesc' ? 'View Count - High to Low' : sortBy === 'durationAsc' ? 'Duration - Shortest First' : sortBy === 'durationDesc' ? 'Duration - Longest First' : 'Upload Date - Newest'}
+                                        <span>{showSortMenu ? '▲' : '▼'}</span>
+                                    </button>
+                                    {showSortMenu && (
+                                        <div className={`absolute right-0 mt-1 w-56 z-50 shadow-lg border ${
+                                            darkMode 
+                                                ? 'bg-[#2a2a2a] border-gray-600' 
+                                                : 'bg-white border-gray-200'
+                                        }`}>
+                                            {[
+                                                { value: 'relevance', label: 'Relevance' },
+                                                { value: 'date', label: 'Upload Date - Newest' },
+                                                { value: 'dateOldest', label: 'Upload Date - Oldest' },
+                                                { value: 'viewCount', label: 'View Count - Low to High' },
+                                                { value: 'viewCountDesc', label: 'View Count - High to Low' },
+                                                { value: 'durationAsc', label: 'Duration - Shortest First' },
+                                                { value: 'durationDesc', label: 'Duration - Longest First' },
+                                            ].map(option => (
+                                                <button
+                                                    key={option.value}
+                                                    onClick={() => { setSortBy(option.value); setShowSortMenu(false); }}
+                                                    className={`w-full text-left px-4 py-2 text-sm ${
+                                                        sortBy === option.value
+                                                            ? darkMode ? 'bg-gray-600 text-white' : 'bg-gray-100 text-gray-900 font-semibold'
+                                                            : darkMode ? 'text-gray-200 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-50'
+                                                    }`}
+                                                >
+                                                    {sortBy === option.value ? '✓ ' : ''}{option.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                                <div className="relative flex-1 overflow-hidden">
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        onKeyPress={(e) => e.key === 'Enter' && searchVideos(false)}
+                                        placeholder="Search something...(ex: cat before:2008)"
+                                        className={`w-full px-4 py-2 border focus:ring-2 focus:border-transparent ${
+                                            darkMode 
+                                                ? 'bg-[#3a3a3a] border-white text-white placeholder-gray-400 focus:ring-white' 
+                                                : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
+                                        }`}
+                                    />
+                                    {loading && (
+                                        <div
+                                            className="search-sweep absolute top-0 h-full w-[55%] pointer-events-none"
+                                            style={{
+                                                background: 'linear-gradient(90deg, transparent 0%, rgba(220,38,38,0.25) 40%, rgba(220,38,38,0.35) 50%, rgba(220,38,38,0.25) 60%, transparent 100%)',
+                                            }}
+                                        />
+                                    )}
+                                </div>
+                                <button
+                                    onClick={() => searchVideos(false)}
+                                    disabled={loading}
+                                    className="px-5 py-2 bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                                >
+                                    {loading ? 'Searching...' : 'Search'}
+                                </button>
+                            </div>
+                            
+                        </div>
+
+                        
+                        {error && (
+                            <div className={`p-4 mb-6 ${
+                                darkMode 
+                                    ? 'bg-[#3a3a3a] border border-gray-700 text-red-400' 
+                                    : 'bg-white border border-gray-200 text-red-600'
+                            }`}>
+                                <strong>Error:</strong> {error}
+                            </div>
+                        )}
+
+                        
+                        {results.length > 0 && (
+                            <div className={`shadow p-6 ${darkMode ? 'bg-[#3a3a3a]' : 'bg-white'}`}>
+                                <h2 className={`text-xl font-semibold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                    Results for: {currentQuery} ({results.length} videos loaded)
+                                </h2>
+
+                                {nextPageToken && results.length < 2000 && (
+                                    <div className="mb-6 text-center">
+                                        <button
+                                            onClick={() => searchVideos(true)}
+                                            disabled={loadingMore}
+                                            className="px-8 py-3 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                                        >
+                                            {loadingMore ? 'Loading...' : 'Load More Results (50 more)'}
+                                        </button>
+                                        <p className={`text-sm mt-2 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                            {results.length} of up to 2000 results loaded
+                                        </p>
+                                    </div>
+                                )}
+
+                                {results.length >= 2000 && (
+                                    <div className="mb-6 text-center">
+                                        <p className={`text-sm p-3 ${
+                                            darkMode 
+                                                ? 'bg-[#3a3a3a] border border-gray-700 text-yellow-400' 
+                                                : 'bg-yellow-50 border border-yellow-200 text-gray-600'
+                                        }`}>
+                                             Maximum of 2000 results reached. Try adding before:date to the search to push further.
+                                        </p>
+                                    </div>
+                                )}
+
+                                <div className="space-y-4">
+                                    {results.map((video) => (
+                                        <div key={video.id.videoId} className={`flex flex-col sm:flex-row gap-4 pb-4 border-b last:border-0 ${
+                                            darkMode ? 'border-gray-700' : 'border-gray-200'
+                                        }`}>
+                                            <div className="relative w-full sm:flex-shrink-0 sm:w-72 h-[200px] sm:h-[162px] overflow-hidden rounded">
+                                                <a 
+                                                    href={getVideoUrl(video.id.videoId)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="block w-full h-full"
+                                                >
+                                                    <img
+                                                        src={video.snippet.thumbnails.medium.url}
+                                                        alt={decodeHTML(video.snippet.title)}
+                                                        className="w-full h-full object-cover"
+                                                    />
+                                                </a>
+                                                {video.snippet.liveBroadcastContent === 'live' ? (
+                                                    <span className="absolute bottom-1.5 right-1.5 bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded pointer-events-none tracking-wide">
+                                                        LIVE
+                                                    </span>
+                                                ) : video.snippet.liveBroadcastContent === 'upcoming' ? (
+                                                    <span className="absolute bottom-1.5 right-1.5 bg-gray-800 bg-opacity-90 text-white text-xs font-bold px-2 py-0.5 rounded pointer-events-none tracking-wide">
+                                                        UPCOMING
+                                                    </span>
+                                                ) : durations[video.id.videoId] && (
+                                                    <span className="absolute bottom-1.5 right-1.5 bg-black bg-opacity-80 text-white text-xs font-medium px-1 py-0.5 rounded pointer-events-none">
+                                                        {durations[video.id.videoId]}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <a 
+                                                    href={getVideoUrl(video.id.videoId)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className={`font-medium text-lg line-clamp-2 ${
+                                                        darkMode 
+                                                            ? 'text-blue-400 hover:text-blue-300' 
+                                                            : 'text-blue-600 hover:text-blue-700'
+                                                    }`}
+                                                >
+                                                    {decodeHTML(video.snippet.title)}
+                                                </a>
+                                                <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                                                    <a
+                                                        href={`https://www.youtube.com/channel/${video.snippet.channelId}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className={`hover:underline ${darkMode ? 'hover:text-white' : 'hover:text-gray-900'}`}
+                                                    >
+                                                        {video.snippet.channelTitle}
+                                                    </a>
+                                                </p>
+                                                <p className={`text-sm mt-1 ${darkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                                                     {formatViewCount(viewCounts[video.id.videoId] || 0)}
+                                                </p>
+                                                <p className={`text-sm mt-1 ${darkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                                                    📅 {formatDate(video.snippet.publishedAt)} 
+                                                    <span
+                                                        className={`ml-2 text-sm cursor-pointer ${darkMode ? 'text-gray-400' : 'text-gray-400'}`}
+                                                        onClick={() => { if (window.getSelection().toString().length === 0) setIsoDates(prev => ({ ...prev, [video.id.videoId]: !prev[video.id.videoId] })); }}
+                                                        title="Click to toggle date format"
+                                                    >
+                                                        ({getDateDisplay(video.snippet.publishedAt, video.id.videoId)})
+                                                    </span>
+                                                </p>
+                                                <p className={`text-sm mt-2 line-clamp-2 ${darkMode ? 'text-gray-400' : 'text-gray-700'}`}>
+                                                    {video.snippet.description}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                
+                                {nextPageToken && results.length < 2000 && (
+                                    <div className="mt-6 text-center">
+                                        <button
+                                            onClick={() => searchVideos(true)}
+                                            disabled={loadingMore}
+                                            className="px-8 py-3 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                                        >
+                                            {loadingMore ? 'Loading...' : 'Load More Results (50 more)'}
+                                        </button>
+                                        <p className={`text-sm mt-2 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                            {results.length} of up to 2000 results loaded
+                                        </p>
+                                    </div>
+                                )}
+
+                                {results.length >= 2000 && (
+                                    <div className="mt-6 text-center">
+                                        <p className={`text-sm p-3 ${
+                                            darkMode 
+                                                ? 'bg-[#3a3a3a] border border-gray-700 text-yellow-400' 
+                                                : 'bg-yellow-50 border border-yellow-200 text-gray-600'
+                                        }`}>
+                                             Maximum of 2000 results reached.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        
+                        {!loading && results.length === 0 && searchQuery && !error && (
+                            <div className={`shadow p-6 text-center ${
+                                darkMode 
+                                    ? 'bg-[#3a3a3a] text-gray-400' 
+                                    : 'bg-white text-gray-600'
+                            }`}>
+                                 No results for "{searchQuery}"
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {showBackToTop && (
+                    <div className="fixed bottom-8 right-8 z-50 flex flex-col gap-2">
+                        <button
+                            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                            title="Go to Top"
+                            className={`w-12 h-12 flex items-center justify-center text-white shadow-lg text-xl font-bold group relative ${darkMode ? 'bg-[#2e3440] hover:bg-[#3b4252]' : 'bg-[#d1d5db] hover:bg-[#b0b5bc]'}`}
+                        >
+                            <span className={darkMode ? 'text-white' : 'text-gray-700'}>▲</span>
+                            <span className="absolute right-14 whitespace-nowrap bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                Go to Top
+                            </span>
+                        </button>
+                        <button
+                            onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })}
+                            title="Go to Bottom"
+                            className={`w-12 h-12 flex items-center justify-center text-white shadow-lg text-xl font-bold group relative ${darkMode ? 'bg-[#2e3440] hover:bg-[#3b4252]' : 'bg-[#d1d5db] hover:bg-[#b0b5bc]'}`}
+                        >
+                            <span className={darkMode ? 'text-white' : 'text-gray-700'}>▼</span>
+                            <span className="absolute right-14 whitespace-nowrap bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                Go to Bottom
+                            </span>
+                        </button>
+                    </div>
+                )}
+                </>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
