@@ -2,9 +2,6 @@
 
 Web link: https://kvnaust.github.io/YouTube-NonBiasedVideoSearcher
 
-<img width="256" height="256" alt="favicon_transparent" src="https://github.com/user-attachments/assets/cafb13ee-ec04-43e0-9b12-a4786c8bfb40" />
-
-
 Search for YouTube videos without bias from the algorithm or your watch history. 
 Sort by relevance, upload date (newest/oldest), view count (lowest/highest), and view duration (shortest/longest). 
 Use Google Dorks to refine your search (before:YYYY-MM-DD) (after:YYYY-MM-DD) (quotations).
