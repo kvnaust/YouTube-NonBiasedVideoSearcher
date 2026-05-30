@@ -1,4 +1,4 @@
-# YouTube-NonBiasedVideoSearcher
+# Non-biased Video Searcher for YouTube
 
 Web link: https://kvnaust.github.io/YouTube-NonBiasedVideoSearcher
 
