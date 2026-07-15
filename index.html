@@ -215,7 +215,14 @@
 
                     
                     const apiOrder = (sortBy === 'viewCountDesc') ? 'viewCount' : (sortBy === 'relevance') ? 'relevance' : 'date';
-                    const baseUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=50&order=${apiOrder}&key=${apiKey}`;
+                    const buildApiQuery = (q) => {
+                        if (!exactTitle) return q;
+                        const dorkPattern = /\b(before|after|site|intitle|inurl|filetype|related|cache|allintitle|allinurl|allintext|AROUND\(\d+\)):\S+/gi;
+                        const dorks = q.match(dorkPattern) || [];
+                        const titlePart = extractTitleFromQuery(q);
+                        return dorks.length > 0 ? `"${titlePart}" ${dorks.join(' ')}` : `"${titlePart}"`;
+                    };
+                    const baseUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(buildApiQuery(query))}&type=video&maxResults=50&order=${apiOrder}&key=${apiKey}`;
 
                     if (sortBy === 'dateOldest' && !isLoadMore) {
                         let allItems = [];
